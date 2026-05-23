@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>API Rate Limiter Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 2rem; }
+    h1 { color: #38bdf8; font-size: 1.8rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #64748b; margin-bottom: 2rem; }
+    .card { background: #1e293b; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #334155; }
+    .card h2 { font-size: 1rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1rem; }
+    input { width: 100%; padding: 0.75rem 1rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 0.95rem; margin-bottom: 0.75rem; }
+    button { padding: 0.75rem 1.5rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: opacity 0.2s; }
+    button:hover { opacity: 0.85; }
+    .btn-primary { background: #38bdf8; color: #0f172a; }
+    .btn-success { background: #22c55e; color: #0f172a; }
+    .btn-danger { background: #ef4444; color: white; }
+    .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
+    .stat { background: #0f172a; border-radius: 8px; padding: 1rem; text-align: center; }
+    .stat-value { font-size: 2rem; font-weight: 700; }
+    .stat-label { font-size: 0.8rem; color: #64748b; margin-top: 0.25rem; }
+    .allowed { color: #22c55e; }
+    .blocked { color: #ef4444; }
+    .total { color: #38bdf8; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 0.5rem 1rem; color: #64748b; font-size: 0.8rem; text-transform: uppercase; border-bottom: 1px solid #334155; }
+    td { padding: 0.75rem 1rem; border-bottom: 1px solid #1e293b; font-size: 0.9rem; }
+    .badge { padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .badge-allowed { background: #14532d; color: #22c55e; }
+    .badge-blocked { background: #450a0a; color: #ef4444; }
+    .token-box { background: #0f172a; padding: 0.75rem 1rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; color: #38bdf8; word-break: break-all; margin-top: 0.75rem; }
+    .response-box { background: #0f172a; padding: 1rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; margin-top: 0.75rem; min-height: 60px; white-space: pre-wrap; }
+    .success-response { color: #22c55e; }
+    .error-response { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>⚡ API Rate Limiter</h1>
+  <p class="subtitle">Request Monitoring & Rate Control Dashboard</p>
+
+  <!-- Register -->
+  <div class="card">
+    <h2>Register & Get API Token</h2>
+    <input type="text" id="regUsername" placeholder="Enter username (e.g. nupur)" />
+    <button class="btn-primary" onclick="register()">Register & Get Token</button>
+    <div id="tokenDisplay" class="token-box" style="display:none"></div>
+  </div>
+
+  <!-- Test API -->
+  <div class="card">
+    <h2>Test Rate Limiting</h2>
+    <input type="text" id="testToken" placeholder="Paste your API token here" />
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+      <button class="btn-success" onclick="makeRequest()">Make Request</button>
+      <button class="btn-danger" onclick="spamRequests()">Spam 15 Requests (trigger limit)</button>
+    </div>
+    <div id="responseBox" class="response-box" style="display:none"></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="card">
+    <h2>Your Request Stats</h2>
+    <input type="text" id="statsToken" placeholder="Paste your API token here" />
+    <button class="btn-primary" onclick="loadStats()">Load Stats</button>
+    <div id="statsDisplay" style="display:none; margin-top:1rem;">
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-value total" id="totalCount">0</div><div class="stat-label">Total Requests</div></div>
+        <div class="stat"><div class="stat-value allowed" id="allowedCount">0</div><div class="stat-label">Allowed</div></div>
+        <div class="stat"><div class="stat-value blocked" id="blockedCount">0</div><div class="stat-label">Blocked</div></div>
+      </div>
+      <table>
+        <thead><tr><th>Time</th><th>Endpoint</th><th>Status</th></tr></thead>
+        <tbody id="logsTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const BASE = 'http://localhost:8080';
+
+    async function register() {
+      const username = document.getElementById('regUsername').value.trim();
+      if (!username) return alert('Enter a username');
+      const res = await fetch(`${BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const data = await res.json();
+      if (data.token) {
+        const box = document.getElementById('tokenDisplay');
+        box.style.display = 'block';
+        box.textContent = `Your Token: ${data.token}`;
+        document.getElementById('testToken').value = data.token;
+        document.getElementById('statsToken').value = data.token;
+      } else {
+        alert(data.error || 'Error registering');
+      }
+    }
+
+    async function makeRequest() {
+      const token = document.getElementById('testToken').value.trim();
+      if (!token) return alert('Enter a token');
+      const res = await fetch(`${BASE}/api/data`, {
+        headers: { 'X-API-TOKEN': token }
+      });
+      const data = await res.json();
+      const box = document.getElementById('responseBox');
+      box.style.display = 'block';
+      box.className = `response-box ${res.status === 200 ? 'success-response' : 'error-response'}`;
+      box.textContent = `[${res.status}] ${JSON.stringify(data, null, 2)}`;
+    }
+
+    async function spamRequests() {
+      const token = document.getElementById('testToken').value.trim();
+      if (!token) return alert('Enter a token');
+      const box = document.getElementById('responseBox');
+      box.style.display = 'block';
+      box.textContent = 'Sending 15 requests...\n';
+      for (let i = 1; i <= 15; i++) {
+        const res = await fetch(`${BASE}/api/data`, { headers: { 'X-API-TOKEN': token } });
+        const data = await res.json();
+        box.textContent += `Request ${i}: [${res.status}] ${data.message || data.error}\n`;
+        box.className = 'response-box';
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+
+    async function loadStats() {
+      const token = document.getElementById('statsToken').value.trim();
+      if (!token) return alert('Enter a token');
+      const res = await fetch(`${BASE}/api/stats`, { headers: { 'X-API-TOKEN': token } });
+      const data = await res.json();
+      document.getElementById('statsDisplay').style.display = 'block';
+      document.getElementById('totalCount').textContent = data.totalRequests || 0;
+      document.getElementById('allowedCount').textContent = data.allowedRequests || 0;
+      document.getElementById('blockedCount').textContent = data.blockedRequests || 0;
+      const tbody = document.getElementById('logsTable');
+      tbody.innerHTML = (data.recentLogs || []).map(log => `
+        <tr>
+          <td>${new Date(log.timestamp).toLocaleTimeString()}</td>
+          <td>${log.endpoint}</td>
+          <td><span class="badge badge-${log.status.toLowerCase()}">${log.status}</span></td>
+        </tr>`).join('');
+    }
+  </script>
+</body>
+</html>
